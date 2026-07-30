@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Vorratsküche</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  html, body { background: #23241F; margin: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .animate-spin { animation: spin 1s linear infinite; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useRef, useCallback } = React;
+
+/* ---- einfache SVG-Icons (kein lucide-react nötig ohne Build-Schritt) ---- */
+const Icon = ({ children, size = 18, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    {children}
+  </svg>
+);
+const CameraIcon = (p) => <Icon {...p}><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3.2"/></Icon>;
+const PlusIcon = (p) => <Icon {...p}><path d="M12 5v14M5 12h14"/></Icon>;
+const XIcon = (p) => <Icon {...p}><path d="M18 6 6 18M6 6l12 12"/></Icon>;
+const ChefHatIcon = (p) => <Icon {...p}><path d="M6 13.87A4 4 0 0 1 7.41 6a5.11 5.11 0 0 1 1.05-1.54 5 5 0 0 1 7.08 0A5.11 5.11 0 0 1 16.59 6 4 4 0 0 1 18 13.87V21H6Z"/><line x1="6" y1="17" x2="18" y2="17"/></Icon>;
+const LoaderIcon = (p) => <Icon {...p} className={`animate-spin ${p.className || ""}`}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></Icon>;
+const SparklesIcon = (p) => <Icon {...p}><path d="m12 3-1.5 4.5L6 9l4.5 1.5L12 15l1.5-4.5L18 9l-4.5-1.5z"/><path d="M5 19l.7-2.1L8 16l-2.3-.9L5 13l-.7 2.1L2 16l2.3.9z"/></Icon>;
+const ClockIcon = (p) => <Icon {...p}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></Icon>;
+const BarChartIcon = (p) => <Icon {...p}><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></Icon>;
+const CheckIcon = (p) => <Icon {...p}><path d="M20 6 9 17l-5-5"/></Icon>;
+const BasketIcon = (p) => <Icon {...p}><path d="m5 11 4-7M19 11l-4-7M2 11h20l-1.6 8.1a2 2 0 0 1-2 1.9H5.6a2 2 0 0 1-2-1.9Z"/><path d="M12 15v2"/></Icon>;
+const AlertIcon = (p) => <Icon {...p}><path d="M10.3 3.9 1.8 18a1.5 1.5 0 0 0 1.3 2.2h17.8a1.5 1.5 0 0 0 1.3-2.2L13.7 3.9a1.5 1.5 0 0 0-2.6 0Z"/><path d="M12 9v4M12 17h.01"/></Icon>;
+
+function uid() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+async function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result.split(",")[1]);
+    r.onerror = () => reject(new Error("Datei konnte nicht gelesen werden."));
+    r.readAsDataURL(file);
+  });
+}
+
+function extractJson(text) {
+  const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+  const start = cleaned.indexOf(cleaned.trim()[0] === "[" ? "[" : "{");
+  const end = Math.max(cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]"));
+  const slice = start >= 0 && end >= 0 ? cleaned.slice(start, end + 1) : cleaned;
+  return JSON.parse(slice);
+}
+
+async function callClaude({ system, messages, maxTokens = 1000 }) {
+  const res = await fetch("/api/claude", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ max_tokens: maxTokens, system, messages }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Anfrage an die KI ist fehlgeschlagen.");
+  const textBlock = data.content?.find((b) => b.type === "text");
+  if (!textBlock) throw new Error("Die KI hat keine Antwort geliefert.");
+  return textBlock.text;
+}
+
+const SCHWIERIGKEIT_LABEL = { einfach: "Einfach", mittel: "Mittel", anspruchsvoll: "Anspruchsvoll" };
+
+function Vorratskueche() {
+  const [ingredients, setIngredients] = useState([]);
+  const [inputText, setInputText] = useState("");
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState("");
+  const [lastPhoto, setLastPhoto] = useState(null);
+  const [mealType, setMealType] = useState("egal");
+  const [style, setStyle] = useState("");
+  const [count, setCount] = useState(1);
+  const [recipeBusy, setRecipeBusy] = useState(false);
+  const [recipeError, setRecipeError] = useState("");
+  const [recipes, setRecipes] = useState([]);
+
+  const addIngredient = useCallback((name) => {
+    const clean = name.trim();
+    if (!clean) return;
+    setIngredients((prev) => {
+      if (prev.some((i) => i.name.toLowerCase() === clean.toLowerCase())) return prev;
+      return [...prev, { id: uid(), name: clean }];
+    });
+  }, []);
+
+  const removeIngredient = (id) => setIngredients((prev) => prev.filter((i) => i.id !== id));
+
+  const handleManualAdd = (e) => {
+    e.preventDefault();
+    inputText.split(",").forEach((part) => addIngredient(part));
+    setInputText("");
+  };
+
+  const handlePhotoPick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setPhotoError("");
+    setPhotoBusy(true);
+    try {
+      const base64 = await fileToBase64(file);
+      setLastPhoto(`data:${file.type};base64,${base64}`);
+      const text = await callClaude({
+        system:
+          "Du erkennst Lebensmittel-Zutaten auf Fotos. Antworte ausschließlich mit reinem JSON, ohne Erklärung, ohne Markdown-Codeblock. Format: {\"zutaten\": [\"Zutat1\", \"Zutat2\"]}. Nutze deutsche, alltagstaugliche Bezeichnungen. Erkenne nur tatsächlich sichtbare Lebensmittel/Zutaten, keine Verpackungen oder Küchengeräte.",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: base64 } },
+              { type: "text", text: "Welche Zutaten sind auf diesem Foto zu erkennen?" },
+            ],
+          },
+        ],
+        maxTokens: 500,
+      });
+      const parsed = extractJson(text);
+      const found = Array.isArray(parsed.zutaten) ? parsed.zutaten : [];
+      if (found.length === 0) {
+        setPhotoError("Auf dem Foto konnten keine Zutaten erkannt werden.");
+      } else {
+        found.forEach(addIngredient);
+      }
+    } catch (err) {
+      setPhotoError(err.message || "Foto konnte nicht ausgewertet werden.");
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const generateRecipes = async () => {
+    if (ingredients.length === 0) return;
+    setRecipeBusy(true);
+    setRecipeError("");
+    setRecipes([]);
+    try {
+      const zutatenListe = ingredients.map((i) => i.name).join(", ");
+      const prefsText = [
+        mealType !== "egal" ? `Mahlzeit: ${mealType}.` : "",
+        style.trim() ? `Gewünschter Stil/Küche: ${style.trim()}.` : "",
+      ].filter(Boolean).join(" ");
+      const text = await callClaude({
+        system:
+          "Du bist ein pragmatischer Koch. Du bekommst eine Liste vorhandener Zutaten (es müssen nicht alle verwendet werden) und schlägst passende Rezepte vor. Kleinigkeiten wie Salz, Pfeffer, Öl, Wasser darfst du als vorhanden annehmen, auch wenn sie nicht gelistet sind. Antworte AUSSCHLIESSLICH mit reinem JSON, kein Markdown, keine Erklärung außerhalb des JSON. Format: {\"rezepte\":[{\"titel\":\"\",\"beschreibung\":\"\",\"dauer_minuten\":0,\"schwierigkeit\":\"einfach|mittel|anspruchsvoll\",\"verwendete_zutaten\":[\"\"],\"fehlende_zutaten\":[\"\"],\"zubereitung\":[\"Schritt 1\",\"Schritt 2\"]}]}. Halte 'beschreibung' auf max. 1 Satz, 'zubereitung' auf max. 6 knappe Schritte, 'fehlende_zutaten' nur echte Lücken.",
+        messages: [
+          { role: "user", content: `Vorhandene Zutaten: ${zutatenListe}. ${prefsText} Schlage ${count} Rezept${count > 1 ? "e" : ""} vor.` },
+        ],
+        maxTokens: 1000,
+      });
+      const parsed = extractJson(text);
+      setRecipes(Array.isArray(parsed.rezepte) ? parsed.rezepte : []);
+    } catch (err) {
+      setRecipeError(err.message || "Rezepte konnten nicht erstellt werden.");
+    } finally {
+      setRecipeBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen w-full" style={{ background: "#23241F", fontFamily: "Inter, sans-serif", color: "#F5EFE0" }}>
+      <header className="px-5 pt-8 pb-6 border-b" style={{ borderColor: "#3A3B32" }}>
+        <div className="flex items-center gap-2 mb-1" style={{ color: "#D6A419" }}>
+          <BasketIcon size={18} />
+          <span className="text-xs tracking-widest uppercase" style={{ letterSpacing: "0.14em" }}>Was ist da? Was wird draus?</span>
+        </div>
+        <h1 style={{ fontFamily: "Fraunces, serif", fontWeight: 600, fontSize: "2rem", lineHeight: 1.1 }}>Vorratsküche</h1>
+        <p className="mt-2 text-sm" style={{ color: "#B8AF9C" }}>Zutaten eintragen oder fotografieren — die Küche denkt sich ein Rezept aus.</p>
+      </header>
+
+      <main className="px-5 py-6 max-w-xl mx-auto space-y-8">
+        <section>
+          <h2 className="text-sm uppercase tracking-wide mb-3" style={{ color: "#D6A419", letterSpacing: "0.1em" }}>Das Regal</h2>
+
+          {ingredients.length === 0 ? (
+            <p className="text-sm italic" style={{ color: "#7A7566" }}>Noch leer. Trag eine Zutat ein oder mach ein Foto vom Kühlschrank.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2 pb-3 mb-1" style={{ borderBottom: "3px solid #4A3B24" }}>
+              {ingredients.map((ing) => (
+                <span key={ing.id} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-sm" style={{ background: "#2E2F28", border: "1px solid #4A4A3E" }}>
+                  {ing.name}
+                  <button onClick={() => removeIngredient(ing.id)} aria-label={`${ing.name} entfernen`} style={{ color: "#B8AF9C" }}>
+                    <XIcon size={13} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={handleManualAdd} className="flex gap-2 mt-3">
+            <input
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="z. B. Zwiebel, Tomate, Reis"
+              className="flex-1 px-3 py-2.5 rounded-sm text-sm outline-none"
+              style={{ background: "#2E2F28", border: "1px solid #4A4A3E", color: "#F5EFE0" }}
+            />
+            <button type="submit" className="px-3 rounded-sm flex items-center justify-center" style={{ background: "#8A9A6E", color: "#1B1F16" }} aria-label="Zutat hinzufügen">
+              <PlusIcon size={18} />
+            </button>
+            <label className="px-3 rounded-sm flex items-center justify-center cursor-pointer" style={{ background: "#D6A419", color: "#1B1F16", opacity: photoBusy ? 0.6 : 1, pointerEvents: photoBusy ? "none" : "auto" }} aria-label="Foto aufnehmen">
+              {photoBusy ? <LoaderIcon size={18} /> : <CameraIcon size={18} />}
+              <input type="file" accept="image/*" capture="environment" onChange={handlePhotoPick} className="hidden" />
+            </label>
+          </form>
+
+          {photoError && (
+            <p className="mt-2 text-sm flex items-center gap-1.5" style={{ color: "#E08A6A" }}>
+              <AlertIcon size={14} /> {photoError}
+            </p>
+          )}
+
+          {lastPhoto && (
+            <div className="mt-4 inline-block" style={{ transform: "rotate(-1.5deg)" }}>
+              <div className="p-2 pb-4" style={{ background: "#FAF6EF" }}>
+                <img src={lastPhoto} alt="Letztes aufgenommenes Foto" className="w-28 h-28 object-cover" />
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section>
+          <h2 className="text-sm uppercase tracking-wide mb-3" style={{ color: "#D6A419", letterSpacing: "0.1em" }}>Feinabstimmung</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <select value={mealType} onChange={(e) => setMealType(e.target.value)} className="px-3 py-2.5 rounded-sm text-sm outline-none" style={{ background: "#2E2F28", border: "1px solid #4A4A3E", color: "#F5EFE0" }}>
+              <option value="egal">Beliebige Mahlzeit</option>
+              <option value="Frühstück">Frühstück</option>
+              <option value="Mittagessen">Mittagessen</option>
+              <option value="Abendessen">Abendessen</option>
+              <option value="Snack">Snack</option>
+            </select>
+            <select value={count} onChange={(e) => setCount(Number(e.target.value))} className="px-3 py-2.5 rounded-sm text-sm outline-none" style={{ background: "#2E2F28", border: "1px solid #4A4A3E", color: "#F5EFE0" }}>
+              <option value={1}>1 Rezept</option>
+              <option value={2}>2 Rezepte</option>
+            </select>
+          </div>
+          <input value={style} onChange={(e) => setStyle(e.target.value)} placeholder="Stil, z. B. mediterran, deftig, Lagerfeuer …" className="w-full mt-3 px-3 py-2.5 rounded-sm text-sm outline-none" style={{ background: "#2E2F28", border: "1px solid #4A4A3E", color: "#F5EFE0" }} />
+        </section>
+
+        <button onClick={generateRecipes} disabled={ingredients.length === 0 || recipeBusy} className="w-full py-3.5 rounded-sm flex items-center justify-center gap-2 text-sm font-medium disabled:opacity-40" style={{ background: "#D6A419", color: "#1B1F16" }}>
+          {recipeBusy ? (<><LoaderIcon size={18} /> Die Küche überlegt …</>) : (<><SparklesIcon size={18} /> Rezept finden</>)}
+        </button>
+
+        {recipeError && (
+          <p className="text-sm flex items-center gap-1.5" style={{ color: "#E08A6A" }}>
+            <AlertIcon size={14} /> {recipeError}
+          </p>
+        )}
+
+        {recipes.length > 0 && (
+          <section className="space-y-5">
+            <h2 className="text-sm uppercase tracking-wide" style={{ color: "#D6A419", letterSpacing: "0.1em" }}>Vorschläge</h2>
+            {recipes.map((r, idx) => (
+              <article key={idx} className="p-4 rounded-sm" style={{ background: "#2E2F28", border: "1px solid #4A4A3E" }}>
+                <h3 style={{ fontFamily: "Fraunces, serif", fontWeight: 600, fontSize: "1.25rem" }}>{r.titel}</h3>
+                {r.beschreibung && <p className="text-sm mt-1" style={{ color: "#B8AF9C" }}>{r.beschreibung}</p>}
+                <div className="flex gap-4 mt-3 text-xs" style={{ color: "#B8AF9C" }}>
+                  {r.dauer_minuten ? <span className="inline-flex items-center gap-1"><ClockIcon size={13} /> {r.dauer_minuten} Min.</span> : null}
+                  {r.schwierigkeit ? <span className="inline-flex items-center gap-1"><BarChartIcon size={13} /> {SCHWIERIGKEIT_LABEL[r.schwierigkeit] || r.schwierigkeit}</span> : null}
+                </div>
+                {Array.isArray(r.verwendete_zutaten) && r.verwendete_zutaten.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {r.verwendete_zutaten.map((z, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 px-2 py-1 rounded-sm text-xs" style={{ background: "#3A3B32", color: "#CFE0B5" }}><CheckIcon size={11} /> {z}</span>
+                    ))}
+                  </div>
+                )}
+                {Array.isArray(r.fehlende_zutaten) && r.fehlende_zutaten.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {r.fehlende_zutaten.map((z, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 px-2 py-1 rounded-sm text-xs" style={{ background: "#3A2C22", color: "#E0B08A" }}>+ {z}</span>
+                    ))}
+                  </div>
+                )}
+                {Array.isArray(r.zubereitung) && r.zubereitung.length > 0 && (
+                  <ol className="mt-4 space-y-2">
+                    {r.zubereitung.map((step, i) => (
+                      <li key={i} className="text-sm flex gap-2">
+                        <span style={{ color: "#D6A419", fontFamily: "Fraunces, serif" }}>{i + 1}.</span>
+                        <span style={{ color: "#F5EFE0" }}>{step}</span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </article>
+            ))}
+          </section>
+        )}
+
+        {!recipeBusy && recipes.length === 0 && !recipeError && (
+          <div className="flex flex-col items-center gap-2 py-8 text-center" style={{ color: "#7A7566" }}>
+            <ChefHatIcon size={28} />
+            <p className="text-sm">Noch keine Rezepte — leg mit dem Regal oben los.</p>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Vorratskueche />);
+</script>
+</body>
+</html>
