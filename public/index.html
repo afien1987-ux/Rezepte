@@ -18,7 +18,7 @@
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel" data-presets="react">
+<script type="text/babel-source" id="app-source">
 const { useState, useRef, useCallback } = React;
 
 /* ---- einfache SVG-Icons (kein lucide-react nötig ohne Build-Schritt) ---- */
@@ -313,6 +313,15 @@ function Vorratskueche() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<Vorratskueche />);
+</script>
+<script>
+(function () {
+  var src = document.getElementById("app-source").textContent;
+  var code = Babel.transform(src, { presets: [["react", { runtime: "classic" }]] }).code;
+  var s = document.createElement("script");
+  s.textContent = code;
+  document.body.appendChild(s);
+})();
 </script>
 </body>
 </html>
