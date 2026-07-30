@@ -61,17 +61,23 @@ function extractJson(text) {
   return JSON.parse(slice);
 }
 
-async function callClaude({ system, messages, maxTokens = 1000 }) {
-  const res = await fetch("/api/claude", {
+async function callOpenAI({ system, messages, maxTokens = 1000 }) {
+  const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ max_tokens: maxTokens, system, messages }),
+    body: JSON.stringify({
+      max_tokens: maxTokens,
+      messages: [{ role: "system", content: system }, ...messages],
+    }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Anfrage an die KI ist fehlgeschlagen.");
-  const textBlock = data.content?.find((b) => b.type === "text");
-  if (!textBlock) throw new Error("Die KI hat keine Antwort geliefert.");
-  return textBlock.text;
+  if (!res.ok) {
+    const msg = typeof data.error === "string" ? data.error : data.error?.message || "Anfrage an die KI ist fehlgeschlagen.";
+    throw new Error(msg);
+  }
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) throw new Error("Die KI hat keine Antwort geliefert.");
+  return content;
 }
 
 const SCHWIERIGKEIT_LABEL = { einfach: "Einfach", mittel: "Mittel", anspruchsvoll: "Anspruchsvoll" };
@@ -115,15 +121,15 @@ function Vorratskueche() {
     try {
       const base64 = await fileToBase64(file);
       setLastPhoto(`data:${file.type};base64,${base64}`);
-      const text = await callClaude({
+      const text = await callOpenAI({
         system:
           "Du erkennst Lebensmittel-Zutaten auf Fotos. Antworte ausschließlich mit reinem JSON, ohne Erklärung, ohne Markdown-Codeblock. Format: {\"zutaten\": [\"Zutat1\", \"Zutat2\"]}. Nutze deutsche, alltagstaugliche Bezeichnungen. Erkenne nur tatsächlich sichtbare Lebensmittel/Zutaten, keine Verpackungen oder Küchengeräte.",
         messages: [
           {
             role: "user",
             content: [
-              { type: "image", source: { type: "base64", media_type: file.type || "image/jpeg", data: base64 } },
               { type: "text", text: "Welche Zutaten sind auf diesem Foto zu erkennen?" },
+              { type: "image_url", image_url: { url: `data:${file.type || "image/jpeg"};base64,${base64}` } },
             ],
           },
         ],
@@ -154,7 +160,7 @@ function Vorratskueche() {
         mealType !== "egal" ? `Mahlzeit: ${mealType}.` : "",
         style.trim() ? `Gewünschter Stil/Küche: ${style.trim()}.` : "",
       ].filter(Boolean).join(" ");
-      const text = await callClaude({
+      const text = await callOpenAI({
         system:
           "Du bist ein pragmatischer Koch. Du bekommst eine Liste vorhandener Zutaten (es müssen nicht alle verwendet werden) und schlägst passende Rezepte vor. Kleinigkeiten wie Salz, Pfeffer, Öl, Wasser darfst du als vorhanden annehmen, auch wenn sie nicht gelistet sind. Antworte AUSSCHLIESSLICH mit reinem JSON, kein Markdown, keine Erklärung außerhalb des JSON. Format: {\"rezepte\":[{\"titel\":\"\",\"beschreibung\":\"\",\"dauer_minuten\":0,\"schwierigkeit\":\"einfach|mittel|anspruchsvoll\",\"verwendete_zutaten\":[\"\"],\"fehlende_zutaten\":[\"\"],\"zubereitung\":[\"Schritt 1\",\"Schritt 2\"]}]}. Halte 'beschreibung' auf max. 1 Satz, 'zubereitung' auf max. 6 knappe Schritte, 'fehlende_zutaten' nur echte Lücken.",
         messages: [

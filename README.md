@@ -1,11 +1,10 @@
 # Vorratsküche – Deployment auf Cloudflare Workers
 
-## 1. Anthropic API-Key besorgen
-Diese App läuft *nicht* mehr über den in Claude.ai eingebauten KI-Zugang, sondern
-braucht einen eigenen API-Key:
+## 1. OpenAI API-Key besorgen
+Diese App braucht einen eigenen OpenAI API-Key:
 
-1. Auf https://console.anthropic.com registrieren/einloggen (eigenes Konto, getrennt
-   vom claude.ai-Abo, mit eigenem Guthaben/Abrechnung).
+1. Auf https://platform.openai.com registrieren/einloggen (eigenes Konto mit
+   eigenem Guthaben/Abrechnung).
 2. Unter **API Keys** einen neuen Key erstellen, kopieren.
 
 ## 2. Repo auf GitHub anlegen
@@ -25,7 +24,7 @@ braucht einen eigenen API-Key:
 ## 4. API-Key als Secret hinterlegen
 1. Im Worker-Projekt: **Settings → Variables and Secrets**.
 2. Neues Secret anlegen:
-   - Name: `ANTHROPIC_API_KEY`
+   - Name: `OPENAI_API_KEY`
    - Wert: der Key aus Schritt 1
    - Typ: **Secret** (nicht Text/Klartext-Variable)
 3. Speichern. Falls die App die Variable nicht sofort zieht: einmal manuell
@@ -38,9 +37,10 @@ Claude-Artifact-Vorschau), sollte der Kamera-Button auf dem Handy normal
 funktionieren und den System-Dialog für Kamera/Galerie öffnen.
 
 ## Hinweise
-- Alle KI-Aufrufe laufen über die Route `/api/claude`, die `worker.js`
-  serverseitig an die Anthropic API weiterreicht — der Key bleibt dadurch
+- Alle KI-Aufrufe laufen über die Route `/api/chat`, die `worker.js`
+  serverseitig an die OpenAI API weiterreicht — der Key bleibt dadurch
   auf dem Server und landet nie im Browser.
-- Modell ist fest auf `claude-sonnet-4-6` gesetzt (in `worker.js` anpassbar).
+- Modell ist fest auf `gpt-4o-mini` gesetzt (in `worker.js` anpassbar,
+  muss Bild-Eingaben unterstützen für die Foto-Erkennung).
 - Kein Build-Schritt: `public/index.html` lädt React, Babel Standalone
   (für JSX im Browser) und Tailwind über CDN.
