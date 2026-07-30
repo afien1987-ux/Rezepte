@@ -11,8 +11,8 @@ export default {
 };
 
 async function handleOpenAI(request, env) {
-  if (!env.OPENAI_API_KEY) {
-    return json({ error: "OPENAI_API_KEY ist auf dem Worker nicht gesetzt. Siehe README." }, 500);
+  if (!env.GEMINI_API_KEY) {
+    return json({ error: "GEMINI_API_KEY ist auf dem Worker nicht gesetzt. Siehe README." }, 500);
   }
 
   let payload;
@@ -26,22 +26,22 @@ async function handleOpenAI(request, env) {
     return json({ error: "Feld 'messages' fehlt oder ist ungültig." }, 400);
   }
 
-  const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+  const geminiRes = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      authorization: `Bearer ${env.GEMINI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model: "gemini-2.0-flash",
       max_tokens: payload.max_tokens || 1000,
       messages: payload.messages,
     }),
   });
 
-  const text = await openaiRes.text();
+  const text = await geminiRes.text();
   return new Response(text, {
-    status: openaiRes.status,
+    status: geminiRes.status,
     headers: { "content-type": "application/json" },
   });
 }
